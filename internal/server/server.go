@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	cachegrid "github.com/shohag/cachegrid"
+	cachegrid "github.com/skshohagmiah/cachegrid"
 )
 
 // Server is the standalone HTTP server for CacheGrid.

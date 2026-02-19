@@ -3,7 +3,7 @@ package cachegrid
 import (
 	"time"
 
-	"github.com/shohag/cachegrid/internal/ratelimit"
+	"github.com/skshohagmiah/cachegrid/internal/ratelimit"
 )
 
 // RateLimitOptions configures token bucket rate limiting.

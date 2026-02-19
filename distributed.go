@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/shohag/cachegrid/internal/cluster"
+	"github.com/skshohagmiah/cachegrid/internal/cluster"
 )
 
 // ownerAddr returns the RPC address of the node that owns the key.

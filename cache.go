@@ -10,12 +10,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/shohag/cachegrid/internal/cache"
-	"github.com/shohag/cachegrid/internal/cluster"
-	"github.com/shohag/cachegrid/internal/lock"
-	"github.com/shohag/cachegrid/internal/pubsub"
-	"github.com/shohag/cachegrid/internal/ratelimit"
-	"github.com/shohag/cachegrid/internal/transport"
+	"github.com/skshohagmiah/cachegrid/internal/cache"
+	"github.com/skshohagmiah/cachegrid/internal/cluster"
+	"github.com/skshohagmiah/cachegrid/internal/lock"
+	"github.com/skshohagmiah/cachegrid/internal/pubsub"
+	"github.com/skshohagmiah/cachegrid/internal/ratelimit"
+	"github.com/skshohagmiah/cachegrid/internal/transport"
 )
 
 // Item represents a cache entry for bulk operations.

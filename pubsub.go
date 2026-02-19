@@ -1,7 +1,7 @@
 package cachegrid
 
 import (
-	"github.com/shohag/cachegrid/internal/pubsub"
+	"github.com/skshohagmiah/cachegrid/internal/pubsub"
 )
 
 // EventType re-exports the internal event type.

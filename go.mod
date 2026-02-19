@@ -1,4 +1,4 @@
-module github.com/shohag/cachegrid
+module github.com/skshohagmiah/cachegrid
 
 go 1.24.4
 

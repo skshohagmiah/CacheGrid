@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	cachegrid "github.com/shohag/cachegrid"
+	cachegrid "github.com/skshohagmiah/cachegrid"
 )
 
 func newTestServer(t *testing.T) *Server {

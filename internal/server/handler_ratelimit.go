@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	cachegrid "github.com/shohag/cachegrid"
+	cachegrid "github.com/skshohagmiah/cachegrid"
 )
 
 // handleRateLimit handles POST /ratelimit/{key}

@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-cachegrid
+/cachegrid
 
 # Test binary
 *.test

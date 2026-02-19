@@ -1,0 +1,49 @@
+services:
+  node1:
+    build: .
+    ports:
+      - "6380:6380"
+    environment:
+      CACHEGRID_NODE_NAME: node-1
+      CACHEGRID_HTTP_PORT: "6380"
+      CACHEGRID_LISTEN_ADDR: "0.0.0.0:7946"
+      CACHEGRID_RPC_PORT: "7947"
+      CACHEGRID_SEEDS: "node2:7946,node3:7946"
+      CACHEGRID_MODE: partitioned
+      CACHEGRID_MAX_MEMORY_MB: "256"
+    networks:
+      - cachegrid
+
+  node2:
+    build: .
+    ports:
+      - "6381:6380"
+    environment:
+      CACHEGRID_NODE_NAME: node-2
+      CACHEGRID_HTTP_PORT: "6380"
+      CACHEGRID_LISTEN_ADDR: "0.0.0.0:7946"
+      CACHEGRID_RPC_PORT: "7947"
+      CACHEGRID_SEEDS: "node1:7946,node3:7946"
+      CACHEGRID_MODE: partitioned
+      CACHEGRID_MAX_MEMORY_MB: "256"
+    networks:
+      - cachegrid
+
+  node3:
+    build: .
+    ports:
+      - "6382:6380"
+    environment:
+      CACHEGRID_NODE_NAME: node-3
+      CACHEGRID_HTTP_PORT: "6380"
+      CACHEGRID_LISTEN_ADDR: "0.0.0.0:7946"
+      CACHEGRID_RPC_PORT: "7947"
+      CACHEGRID_SEEDS: "node1:7946,node2:7946"
+      CACHEGRID_MODE: partitioned
+      CACHEGRID_MAX_MEMORY_MB: "256"
+    networks:
+      - cachegrid
+
+networks:
+  cachegrid:
+    driver: bridge

@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cachegrid
+  labels:
+    app: cachegrid
+spec:
+  clusterIP: None
+  selector:
+    app: cachegrid
+  ports:
+    - name: http
+      port: 6380
+      targetPort: 6380
+    - name: gossip
+      port: 7946
+      targetPort: 7946
+    - name: rpc
+      port: 7947
+      targetPort: 7947
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cachegrid
+spec:
+  serviceName: cachegrid
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cachegrid
+  template:
+    metadata:
+      labels:
+        app: cachegrid
+    spec:
+      containers:
+        - name: cachegrid
+          image: cachegrid:latest
+          ports:
+            - containerPort: 6380
+              name: http
+            - containerPort: 7946
+              name: gossip
+            - containerPort: 7947
+              name: rpc
+          env:
+            - name: CACHEGRID_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CACHEGRID_HTTP_PORT
+              value: "6380"
+            - name: CACHEGRID_LISTEN_ADDR
+              value: "0.0.0.0:7946"
+            - name: CACHEGRID_RPC_PORT
+              value: "7947"
+            - name: CACHEGRID_SEEDS
+              value: "cachegrid-0.cachegrid:7946,cachegrid-1.cachegrid:7946,cachegrid-2.cachegrid:7946"
+            - name: CACHEGRID_MODE
+              value: partitioned
+            - name: CACHEGRID_MAX_MEMORY_MB
+              value: "512"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 6380
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 6380
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"

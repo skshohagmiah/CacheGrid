@@ -11,7 +11,8 @@ GOFLAGS := -trimpath
 LDFLAGS := -s -w
 
 .PHONY: all build run run-disk test test-verbose test-race bench lint fmt vet clean \
-        docker-build docker-run docker-compose-up docker-compose-down help
+        docker-build docker-run docker-compose-up docker-compose-down help \
+        test-features test-cluster test-disk test-perf test-scripts
 
 ## ─── Build ──────────────────────────────────────────────
 
@@ -66,6 +67,26 @@ test-cover: ## Run tests with coverage report
 
 test-short: ## Run only fast tests (skip slow ones)
 	go test ./... -short -count=1
+
+## ─── Integration Tests (Scripts) ────────────────────────
+
+test-features: build ## Run REST API feature tests (requires server)
+	@bash ./scripts/test-features.sh
+
+test-cluster: build ## Run 3-node cluster tests
+	@bash ./scripts/test-cluster.sh
+
+test-disk: build ## Run disk persistence tests
+	@bash ./scripts/test-disk.sh
+
+test-perf: build ## Run performance/benchmark tests
+	@bash ./scripts/test-performance.sh
+
+test-scripts: build ## Run ALL integration test scripts
+	@bash ./scripts/test-all.sh
+
+test-scripts-quick: build ## Run quick integration tests (skip cluster/disk/perf)
+	@bash ./scripts/test-all.sh --quick
 
 ## ─── Benchmark ──────────────────────────────────────────
 

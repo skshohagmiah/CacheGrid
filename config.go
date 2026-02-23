@@ -16,11 +16,11 @@ const (
 
 // Config holds configuration for a Cache instance.
 type Config struct {
-	// NumShards is the number of internal shards. Must be a power of 2.
+	// NumShards is the number of internal shards (memory mode only). Must be a power of 2.
 	// Default: 256.
 	NumShards int
 
-	// MaxMemoryMB is the maximum memory in megabytes across all shards.
+	// MaxMemoryMB is the maximum memory in megabytes across all shards (memory mode only).
 	// 0 means unlimited.
 	MaxMemoryMB int64
 
@@ -31,6 +31,13 @@ type Config struct {
 	// SweeperInterval controls how often the background goroutine
 	// checks for expired entries. Default: 1 second.
 	SweeperInterval time.Duration
+
+	// StorageMode selects the storage backend. Default: Memory.
+	StorageMode StorageMode
+
+	// DiskPath is the directory for disk-based storage (Pebble).
+	// Required when StorageMode is Disk. Ignored for Memory mode.
+	DiskPath string
 
 	// --- Cluster Configuration ---
 
@@ -73,17 +80,26 @@ func DefaultConfig() Config {
 }
 
 func (c *Config) validate() error {
-	if c.NumShards <= 0 {
-		c.NumShards = 256
-	}
-	if c.NumShards&(c.NumShards-1) != 0 {
-		return fmt.Errorf("cachegrid: NumShards must be a power of 2, got %d", c.NumShards)
-	}
-	if c.MaxMemoryMB < 0 {
-		return fmt.Errorf("cachegrid: MaxMemoryMB must be >= 0, got %d", c.MaxMemoryMB)
-	}
 	if c.SweeperInterval <= 0 {
 		c.SweeperInterval = time.Second
 	}
+
+	switch c.StorageMode {
+	case Disk:
+		if c.DiskPath == "" {
+			return fmt.Errorf("cachegrid: DiskPath is required when StorageMode is Disk")
+		}
+	default: // Memory
+		if c.NumShards <= 0 {
+			c.NumShards = 256
+		}
+		if c.NumShards&(c.NumShards-1) != 0 {
+			return fmt.Errorf("cachegrid: NumShards must be a power of 2, got %d", c.NumShards)
+		}
+		if c.MaxMemoryMB < 0 {
+			return fmt.Errorf("cachegrid: MaxMemoryMB must be >= 0, got %d", c.MaxMemoryMB)
+		}
+	}
+
 	return nil
 }

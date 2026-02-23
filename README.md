@@ -1,6 +1,6 @@
 # CacheGrid
 
-A high-performance distributed cache for Go. Embed it as a library or run it as a standalone server.
+A high-performance distributed cache for Go with pluggable storage backends. Embed it as a library or run it as a standalone server.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/skshohagmiah/cachegrid.svg)](https://pkg.go.dev/github.com/skshohagmiah/cachegrid)
 [![Go Report Card](https://goreportcard.com/badge/github.com/skshohagmiah/cachegrid)](https://goreportcard.com/report/github.com/skshohagmiah/cachegrid)
@@ -9,6 +9,7 @@ A high-performance distributed cache for Go. Embed it as a library or run it as 
 ## Features
 
 - **Sub-microsecond reads** — 76ns Get, 441ns Set (benchmarked)
+- **Pluggable storage** — In-memory (default) or disk-based (PebbleDB)
 - **Distributed** — Gossip-based cluster with consistent hashing
 - **Three cache modes** — Partitioned, Replicated, NearCache
 - **Distributed locks** — With fencing tokens and auto-release
@@ -19,7 +20,6 @@ A high-performance distributed cache for Go. Embed it as a library or run it as 
 - **HTTP middleware** — Rate limiting and response caching for `net/http`
 - **Standalone server** — REST API with Docker and Kubernetes support
 - **Prometheus metrics** — `/metrics` endpoint out of the box
-- **Zero external dependencies at runtime** — No Redis, no Memcached
 
 ## Install
 
@@ -29,7 +29,7 @@ go get github.com/skshohagmiah/cachegrid
 
 ## Quick Start
 
-### Embedded (Go Library)
+### In-Memory Cache (Default)
 
 ```go
 package main
@@ -42,13 +42,10 @@ import (
 )
 
 func main() {
-    cache, _ := cachegrid.New(cachegrid.Config{
-        MaxMemoryMB: 256,
-        DefaultTTL:  5 * time.Minute,
-    })
+    // Simplest way — zero config, in-memory, sensible defaults
+    cache, _ := cachegrid.NewMemory()
     defer cache.Shutdown()
 
-    // Set and Get
     cache.Set("user:123", map[string]string{"name": "Alice"}, 5*time.Minute)
 
     var user map[string]string
@@ -56,6 +53,29 @@ func main() {
         fmt.Println(user["name"]) // Alice
     }
 }
+```
+
+### Disk-Based Cache (PebbleDB)
+
+```go
+// Persistent storage — data survives restarts
+cache, _ := cachegrid.NewDisk("/var/data/my-cache")
+defer cache.Shutdown()
+
+cache.Set("session:abc", sessionData, 24*time.Hour)
+```
+
+### Full Configuration
+
+```go
+cache, _ := cachegrid.New(cachegrid.Config{
+    StorageMode: cachegrid.Memory,   // or cachegrid.Disk
+    DiskPath:    "./cache-data",     // required for Disk mode
+    NumShards:   256,                // memory mode only, must be power of 2
+    MaxMemoryMB: 512,                // memory mode only, 0 = unlimited
+    DefaultTTL:  5 * time.Minute,
+})
+defer cache.Shutdown()
 ```
 
 ### Distributed Cluster
@@ -82,6 +102,15 @@ curl -X PUT localhost:6380/cache/user:123 \
 
 curl localhost:6380/cache/user:123
 ```
+
+## Storage Modes
+
+| Mode | Backend | Use Case |
+|------|---------|----------|
+| **Memory** (default) | Sharded in-memory maps + LRU eviction | Low-latency, ephemeral caching |
+| **Disk** | CockroachDB PebbleDB | Persistent cache, large datasets, survives restarts |
+
+Both modes support the full API — Set, Get, Delete, TTL, Incr, tags, locks, pub/sub, etc.
 
 ## API Reference
 
@@ -220,10 +249,17 @@ handler = cachegrid.HTTPCache(cache, 30*time.Second)(mux)
 
 ```go
 cachegrid.Config{
-    NumShards:       256,           // must be power of 2
-    MaxMemoryMB:     256,           // 0 = unlimited
-    DefaultTTL:      5*time.Minute, // 0 = no expiry
-    SweeperInterval: time.Second,   // expired key cleanup interval
+    // Storage
+    StorageMode:     cachegrid.Memory, // Memory (default) or Disk
+    DiskPath:        "./data",         // required for Disk mode
+
+    // Memory mode settings
+    NumShards:       256,              // must be power of 2
+    MaxMemoryMB:     256,              // 0 = unlimited
+
+    // General
+    DefaultTTL:      5*time.Minute,    // 0 = no expiry
+    SweeperInterval: time.Second,      // expired key cleanup interval
 
     // Cluster (optional — omit for local-only mode)
     ListenAddr:   ":7946",
@@ -240,9 +276,12 @@ cachegrid.Config{
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CACHEGRID_SHARDS` | `256` | Number of shards |
-| `CACHEGRID_MAX_MEMORY_MB` | `0` | Memory limit |
+| `CACHEGRID_STORAGE_MODE` | `memory` | `memory` or `disk` |
+| `CACHEGRID_DISK_PATH` | `./cachegrid-data` | Disk storage directory |
+| `CACHEGRID_SHARDS` | `256` | Number of shards (memory mode) |
+| `CACHEGRID_MAX_MEMORY_MB` | `0` | Memory limit (memory mode) |
 | `CACHEGRID_DEFAULT_TTL` | `0` | Default TTL (e.g., `5m`) |
+| `CACHEGRID_SWEEPER_INTERVAL` | `1s` | Expiry sweep interval |
 | `CACHEGRID_NODE_NAME` | hostname | Node identifier |
 | `CACHEGRID_LISTEN_ADDR` | `` | Gossip bind address |
 | `CACHEGRID_SEEDS` | `` | Comma-separated seed nodes |
@@ -252,16 +291,22 @@ cachegrid.Config{
 
 ## Deployment
 
+### Using Make
+
+```bash
+make build          # Build the binary
+make test           # Run all tests
+make bench          # Run benchmarks
+make lint           # Run linter
+make docker-build   # Build Docker image
+make run            # Run standalone server
+make run-disk       # Run with disk storage
+```
+
 ### Docker Compose
 
 ```bash
 docker compose up -d   # starts 3-node cluster
-```
-
-```bash
-curl localhost:6380/health
-curl localhost:6381/health
-curl localhost:6382/health
 ```
 
 ### Kubernetes
@@ -292,14 +337,19 @@ BenchmarkConcurrentRead-10  10,314,302   122.10 ns/op     87 B/op    4 allocs/op
 BenchmarkConcurrentMixed-10  8,313,844   147.90 ns/op    138 B/op    5 allocs/op
 ```
 
-Run locally: `go test -bench=. -benchmem`
+Run locally: `make bench`
 
 ## Architecture
 
+For a deep dive into internals, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Public API (cachegrid)                 │
-│  Set · Get · Delete · Lock · RateLimit · Subscribe · ...    │
+│                      Public API (cachegrid)                  │
+│  Set · Get · Delete · Lock · RateLimit · Subscribe · ...     │
+├─────────────────────────────────────────────────────────────┤
+│                     Store Interface                          │
+│              MemoryStore  ·  PebbleStore                     │
 ├──────────────┬──────────────┬───────────────┬───────────────┤
 │  internal/   │  internal/   │  internal/    │  internal/    │
 │  cache       │  cluster     │  transport    │  lock         │
@@ -321,11 +371,14 @@ Run locally: `go test -bench=. -benchmem`
 ```
 cachegrid/
 ├── cache.go, config.go, errors.go      # Core cache + configuration
-├── distributed.go                       # Cluster routing logic
-├── lock.go, ratelimit.go               # Distributed locks + rate limiting
-├── pubsub.go, tags.go, namespace.go    # Events, tags, namespaces
-├── middleware.go                        # HTTP middleware helpers
-├── *_test.go                           # 121 tests across all features
+├── store.go                            # Store interface + StorageMode
+├── store_memory.go                     # In-memory backend (sharded maps + LRU)
+├── store_pebble.go                     # Disk backend (PebbleDB)
+├── distributed.go                      # Cluster routing logic
+├── lock.go, ratelimit.go              # Distributed locks + rate limiting
+├── pubsub.go, tags.go, namespace.go   # Events, tags, namespaces
+├── middleware.go                       # HTTP middleware helpers
+├── *_test.go                          # Tests across all features
 ├── internal/
 │   ├── cache/       # Sharded store, LRU eviction, serialization
 │   ├── cluster/     # Hash ring, gossip membership, cluster state
@@ -335,6 +388,7 @@ cachegrid/
 │   ├── pubsub/      # Event broker + subscriptions
 │   └── server/      # HTTP server, handlers, middleware
 ├── cmd/cachegrid/   # Standalone server binary
+├── Makefile
 ├── Dockerfile
 ├── docker-compose.yml
 └── kubernetes.yaml

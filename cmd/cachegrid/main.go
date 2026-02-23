@@ -28,6 +28,15 @@ func main() {
 	config.HTTPPort = envInt("CACHEGRID_HTTP_PORT", 6380)
 	config.VirtualNodes = envInt("CACHEGRID_VIRTUAL_NODES", 150)
 
+	// Storage mode
+	switch envStr("CACHEGRID_STORAGE_MODE", "memory") {
+	case "disk":
+		config.StorageMode = cachegrid.Disk
+		config.DiskPath = envStr("CACHEGRID_DISK_PATH", "./cachegrid-data")
+	default:
+		config.StorageMode = cachegrid.Memory
+	}
+
 	if seeds := envStr("CACHEGRID_SEEDS", ""); seeds != "" {
 		config.Peers = strings.Split(seeds, ",")
 	}
@@ -65,8 +74,8 @@ func main() {
 		os.Exit(0)
 	}()
 
-	logger.Printf("CacheGrid starting (mode=%s, shards=%d, http=%s)",
-		modeName(config.Mode), config.NumShards, httpAddr)
+	logger.Printf("CacheGrid starting (mode=%s, storage=%s, http=%s)",
+		modeName(config.Mode), storageModeName(config.StorageMode), httpAddr)
 
 	if err := srv.Start(); err != nil {
 		logger.Fatalf("HTTP server error: %v", err)
@@ -81,6 +90,15 @@ func modeName(m cachegrid.Mode) string {
 		return "nearcache"
 	default:
 		return "partitioned"
+	}
+}
+
+func storageModeName(m cachegrid.StorageMode) string {
+	switch m {
+	case cachegrid.Disk:
+		return "disk"
+	default:
+		return "memory"
 	}
 }
 

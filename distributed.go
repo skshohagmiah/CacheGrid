@@ -29,7 +29,7 @@ func (c *Cache) distributedSet(key string, data []byte, ttl time.Duration, tags 
 	switch c.config.Mode {
 	case Replicated:
 		// Set locally
-		c.getShard(key).Set(key, data, ttl)
+		c.store.Set(key, data, ttl)
 		// Replicate to all other live nodes
 		if c.state != nil {
 			for _, node := range c.state.LiveNodes() {
@@ -44,7 +44,7 @@ func (c *Cache) distributedSet(key string, data []byte, ttl time.Duration, tags 
 
 	case NearCache:
 		// Always set locally (near cache) + on the owner
-		c.getShard(key).Set(key, data, ttl)
+		c.store.Set(key, data, ttl)
 		if addr := c.ownerAddr(key); addr != "" {
 			return c.transport.RemoteSet(context.Background(), addr, key, data, ttl, tags)
 		}
@@ -54,7 +54,7 @@ func (c *Cache) distributedSet(key string, data []byte, ttl time.Duration, tags 
 		if addr := c.ownerAddr(key); addr != "" {
 			return c.transport.RemoteSet(context.Background(), addr, key, data, ttl, tags)
 		}
-		c.getShard(key).Set(key, data, ttl)
+		c.store.Set(key, data, ttl)
 		return nil
 	}
 }
@@ -64,11 +64,11 @@ func (c *Cache) distributedGet(key string) ([]byte, bool) {
 	switch c.config.Mode {
 	case Replicated:
 		// All nodes have all data — always local
-		return c.getShard(key).Get(key)
+		return c.store.Get(key)
 
 	case NearCache:
 		// Try local first
-		if data, ok := c.getShard(key).Get(key); ok {
+		if data, ok := c.store.Get(key); ok {
 			return data, true
 		}
 		// Miss locally, fetch from owner
@@ -76,7 +76,7 @@ func (c *Cache) distributedGet(key string) ([]byte, bool) {
 			data, found, err := c.transport.RemoteGet(context.Background(), addr, key)
 			if err == nil && found {
 				// Cache locally for next time
-				c.getShard(key).Set(key, data, c.config.DefaultTTL)
+				c.store.Set(key, data, c.config.DefaultTTL)
 				return data, true
 			}
 		}
@@ -90,7 +90,7 @@ func (c *Cache) distributedGet(key string) ([]byte, bool) {
 			}
 			return data, found
 		}
-		return c.getShard(key).Get(key)
+		return c.store.Get(key)
 	}
 }
 
@@ -98,7 +98,7 @@ func (c *Cache) distributedGet(key string) ([]byte, bool) {
 func (c *Cache) distributedDelete(key string) {
 	switch c.config.Mode {
 	case Replicated:
-		c.getShard(key).Delete(key)
+		c.store.Delete(key)
 		if c.state != nil {
 			for _, node := range c.state.LiveNodes() {
 				if node.Name == c.state.SelfName() {
@@ -109,7 +109,7 @@ func (c *Cache) distributedDelete(key string) {
 		}
 
 	case NearCache:
-		c.getShard(key).Delete(key)
+		c.store.Delete(key)
 		if addr := c.ownerAddr(key); addr != "" {
 			c.transport.RemoteDelete(context.Background(), addr, key)
 		}
@@ -119,7 +119,7 @@ func (c *Cache) distributedDelete(key string) {
 			c.transport.RemoteDelete(context.Background(), addr, key)
 			return
 		}
-		c.getShard(key).Delete(key)
+		c.store.Delete(key)
 	}
 }
 
@@ -142,11 +142,11 @@ func (c *Cache) OnNodeUpdate(node *cluster.NodeInfo) {}
 // --- transport.LocalHandler implementation ---
 
 func (c *Cache) HandleGet(key string) ([]byte, bool) {
-	return c.getShard(key).Get(key)
+	return c.store.Get(key)
 }
 
 func (c *Cache) HandleSet(key string, value []byte, ttl time.Duration, tags []string) {
-	c.getShard(key).Set(key, value, ttl)
+	c.store.Set(key, value, ttl)
 	if len(tags) > 0 {
 		c.tags.Add(key, tags)
 	}
@@ -154,17 +154,17 @@ func (c *Cache) HandleSet(key string, value []byte, ttl time.Duration, tags []st
 
 func (c *Cache) HandleDelete(key string) bool {
 	c.tags.Remove(key)
-	return c.getShard(key).Delete(key)
+	return c.store.Delete(key)
 }
 
 func (c *Cache) HandleExists(key string) bool {
-	return c.getShard(key).Exists(key)
+	return c.store.Exists(key)
 }
 
 func (c *Cache) HandleMGet(keys []string) map[string][]byte {
 	results := make(map[string][]byte, len(keys))
 	for _, key := range keys {
-		if data, ok := c.getShard(key).Get(key); ok {
+		if data, ok := c.store.Get(key); ok {
 			results[key] = data
 		}
 	}
@@ -172,7 +172,7 @@ func (c *Cache) HandleMGet(keys []string) map[string][]byte {
 }
 
 func (c *Cache) HandleIncr(key string, delta int64) (int64, error) {
-	return c.getShard(key).Incr(key, delta, c.config.DefaultTTL)
+	return c.store.Incr(key, delta, c.config.DefaultTTL)
 }
 
 func (c *Cache) HandleLockAcquire(key string, ttl time.Duration) (string, uint64, bool) {

@@ -3,7 +3,6 @@ package cachegrid
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"net"
 	"os"
 	"strconv"
@@ -24,12 +23,11 @@ type Item struct {
 	TTL   time.Duration
 }
 
-// Cache is a sharded in-memory cache with LRU eviction and TTL support.
+// Cache is a high-performance cache with pluggable storage backends.
 // It optionally forms a distributed cluster via gossip and RPC.
 type Cache struct {
-	shards []*cache.Shard
+	store  Store
 	config Config
-	mask   uint32
 	closed atomic.Bool
 	done   chan struct{}
 
@@ -61,20 +59,26 @@ func New(config Config) (*Cache, error) {
 		config.NodeName = hostname
 	}
 
-	var perShardMax int64
-	if config.MaxMemoryMB > 0 {
-		perShardMax = (config.MaxMemoryMB * 1024 * 1024) / int64(config.NumShards)
-	}
-
-	shards := make([]*cache.Shard, config.NumShards)
-	for i := range shards {
-		shards[i] = cache.NewShard(perShardMax)
+	// Create the storage backend
+	var store Store
+	switch config.StorageMode {
+	case Disk:
+		ps, err := NewPebbleStore(config.DiskPath)
+		if err != nil {
+			return nil, fmt.Errorf("cachegrid: failed to open disk store: %w", err)
+		}
+		store = ps
+	default: // Memory
+		var perShardMax int64
+		if config.MaxMemoryMB > 0 {
+			perShardMax = (config.MaxMemoryMB * 1024 * 1024) / int64(config.NumShards)
+		}
+		store = NewMemoryStore(config.NumShards, perShardMax)
 	}
 
 	c := &Cache{
-		shards:        shards,
+		store:         store,
 		config:        config,
-		mask:          uint32(config.NumShards - 1),
 		done:          make(chan struct{}),
 		lockEngine:    lock.NewEngine(),
 		tokenBucket:   ratelimit.NewTokenBucket(),
@@ -83,18 +87,16 @@ func New(config Config) (*Cache, error) {
 		tags:          newTagIndex(),
 	}
 
-	// Wire shard callbacks to the broker
-	for _, s := range c.shards {
-		s.OnEvict = func(key string, value []byte) {
-			c.broker.Publish(pubsub.Event{Type: pubsub.EventEvict, Key: key, Value: value})
-			c.broker.FireEvict(key, value)
-			c.tags.Remove(key)
-		}
-		s.OnExpire = func(key string, value []byte) {
-			c.broker.Publish(pubsub.Event{Type: pubsub.EventExpire, Key: key, Value: value})
-			c.tags.Remove(key)
-		}
-	}
+	// Wire store callbacks to the broker
+	store.SetOnEvict(func(key string, value []byte) {
+		c.broker.Publish(pubsub.Event{Type: pubsub.EventEvict, Key: key, Value: value})
+		c.broker.FireEvict(key, value)
+		c.tags.Remove(key)
+	})
+	store.SetOnExpire(func(key string, value []byte) {
+		c.broker.Publish(pubsub.Event{Type: pubsub.EventExpire, Key: key, Value: value})
+		c.tags.Remove(key)
+	})
 
 	// Initialize cluster if ListenAddr is set
 	if config.ListenAddr != "" {
@@ -114,6 +116,7 @@ func New(config Config) (*Cache, error) {
 		t := transport.NewTCPTransport(c, 5*time.Second)
 		rpcAddr := fmt.Sprintf("%s:%d", host, config.GRPCPort)
 		if err := t.Start(rpcAddr); err != nil {
+			store.Close()
 			return nil, fmt.Errorf("cachegrid: failed to start RPC transport: %w", err)
 		}
 		c.transport = t
@@ -131,6 +134,7 @@ func New(config Config) (*Cache, error) {
 		}, cs, r, c)
 		if err != nil {
 			t.Stop()
+			store.Close()
 			return nil, fmt.Errorf("cachegrid: failed to create cluster: %w", err)
 		}
 		c.membership = m
@@ -211,7 +215,7 @@ func (c *Cache) Exists(key string) bool {
 		ok, err := c.transport.RemoteExists(context.Background(), addr, key)
 		return err == nil && ok
 	}
-	return c.getShard(key).Exists(key)
+	return c.store.Exists(key)
 }
 
 // TTL returns the remaining time-to-live for a key.
@@ -219,7 +223,7 @@ func (c *Cache) TTL(key string) time.Duration {
 	if key == "" || c.closed.Load() {
 		return 0
 	}
-	return c.getShard(key).TTL(key)
+	return c.store.TTL(key)
 }
 
 // GetOrSet retrieves a value or computes and stores it on miss.
@@ -293,7 +297,7 @@ func (c *Cache) Incr(key string, delta int64) (int64, error) {
 	if addr := c.ownerAddr(key); addr != "" {
 		return c.transport.RemoteIncr(context.Background(), addr, key, delta)
 	}
-	return c.getShard(key).Incr(key, delta, c.config.DefaultTTL)
+	return c.store.Incr(key, delta, c.config.DefaultTTL)
 }
 
 // Decr atomically decrements a counter.
@@ -307,16 +311,12 @@ func (c *Cache) Decr(key string, delta int64) (int64, error) {
 	if addr := c.ownerAddr(key); addr != "" {
 		return c.transport.RemoteIncr(context.Background(), addr, key, -delta)
 	}
-	return c.getShard(key).Incr(key, -delta, c.config.DefaultTTL)
+	return c.store.Incr(key, -delta, c.config.DefaultTTL)
 }
 
-// Len returns the total number of items across all shards.
+// Len returns the total number of items.
 func (c *Cache) Len() int {
-	n := 0
-	for _, s := range c.shards {
-		n += s.Len()
-	}
-	return n
+	return c.store.Len()
 }
 
 // Shutdown gracefully stops all subsystems.
@@ -332,8 +332,14 @@ func (c *Cache) Shutdown() error {
 		}
 		c.lockEngine.Shutdown()
 		c.broker.Shutdown()
+		c.store.Close()
 	}
 	return nil
+}
+
+// Store returns the underlying storage backend.
+func (c *Cache) Store() Store {
+	return c.store
 }
 
 // ClusterState returns the cluster state, or nil if running in local mode.
@@ -356,31 +362,16 @@ func (c *Cache) LockEngine() *lock.Engine {
 	return c.lockEngine
 }
 
-func (c *Cache) getShard(key string) *cache.Shard {
-	h := fnv.New32a()
-	h.Write([]byte(key))
-	return c.shards[h.Sum32()&c.mask]
-}
-
 func (c *Cache) startSweeper() {
 	ticker := time.NewTicker(c.config.SweeperInterval)
 	defer ticker.Stop()
-
-	shardIdx := 0
-	shardsPerTick := len(c.shards) / 4
-	if shardsPerTick < 1 {
-		shardsPerTick = 1
-	}
 
 	for {
 		select {
 		case <-c.done:
 			return
 		case <-ticker.C:
-			for i := 0; i < shardsPerTick; i++ {
-				c.shards[shardIdx].DeleteExpired()
-				shardIdx = (shardIdx + 1) % len(c.shards)
-			}
+			c.store.DeleteExpired()
 		}
 	}
 }

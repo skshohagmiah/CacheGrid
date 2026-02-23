@@ -394,6 +394,22 @@ cachegrid/
 └── kubernetes.yaml
 ```
 
+## Examples
+
+See the [examples/](examples/) directory for runnable apps:
+
+| Example | Description |
+|---------|-------------|
+| [basic/](examples/basic/) | Core features: CRUD, TTL, counters, tags, namespaces, disk persistence |
+| [webapi/](examples/webapi/) | Bookstore REST API with response caching, rate limiting, distributed locks |
+| [sessions/](examples/sessions/) | Persistent session store using disk mode (survives restarts) |
+| [pubsub/](examples/pubsub/) | Real-time cache event monitoring with pattern subscriptions |
+
+```bash
+go run ./examples/basic    # try it out
+go run ./examples/webapi   # then curl localhost:8080/books
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
